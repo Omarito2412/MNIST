@@ -3,114 +3,153 @@ import cv2
 import random
 from scipy import optimize
 
-def main():
+class nn:
+    def __init__(self, neurons, mode="train"):
 
-    HIDDEN_LAYER_NEURONS = 50
-    OUTPUT_NEURONS = 10
-    file_data = np.loadtxt("../../train.csv", dtype=np.uint8, skiprows=1, delimiter=",")  # Load the data
-    y = file_data[:, 0]  # Extract the labels
-    x = file_data[:, 1:] # Extract the unrolled images
-    y_matrix = np.zeros((y.shape[0], OUTPUT_NEURONS))   # Initialize Matrix to hold label vectors
-    for i in range(0, y.shape[0]):  # Apply one hot on the vectors
-        y_matrix[i, y[i]] = 1
+        self.HIDDEN_LAYER_NEURONS = neurons
+        self.OUTPUT_NEURONS = 10
+        if (mode == "test"):
+            self.visualizeWithPredict(10)
+            return
+        file_data = np.loadtxt("../../tiny.csv", dtype=np.uint8, skiprows=1, delimiter=",")  # Load the data
+        y = file_data[:, 0]  # Extract the labels
+        x = file_data[:, 1:] # Extract the unrolled images
+        y_matrix = np.zeros((y.shape[0], self.OUTPUT_NEURONS))   # Initialize Matrix to hold label vectors
+        for i in range(0, y.shape[0]):  # Apply one hot on the vectors
+            y_matrix[i, y[i]] = 1
+        """
+            Initialize weights using Gaussian distribution
+            Theta1 of dimensions equal to # of Input neurons + 1
+            and # of hidden neurons
+            Theta2 of dimensions equal to # of Output neurons
+            and # of hidden neurons + bias neuron
+        """
+        Theta1 = np.random.normal(scale=0.01, size=(self.HIDDEN_LAYER_NEURONS, x.shape[1]))
+        Theta1 = np.c_[np.ones((Theta1.shape[0], 1)), Theta1]
+        Theta2 = np.random.normal(scale=0.01, size=(y_matrix.shape[1], self.HIDDEN_LAYER_NEURONS))
+        Theta2 = np.c_[np.ones((Theta2.shape[0], 1)), Theta2]
+        Theta1_unrolled = Theta1.reshape((1, Theta1.shape[0] * Theta1.shape[1]))
+        Theta2_unrolled = Theta2.reshape((1, Theta2.shape[0] * Theta2.shape[1]))
+        Theta = np.concatenate((Theta1_unrolled, Theta2_unrolled), axis=1).ravel()
+        self.costFunction(Theta, x, y_matrix, Theta1.shape, Theta2.shape)
+        # visualize(x, 10)   # Visualize some random samples
+        # visualizeWithPredict(x, ((Theta1.shape), (Theta2.shape)), 10)
+        opt = optimize.fmin_cg(self.tempCost, Theta, maxiter=1, args=(x, y_matrix, Theta1.shape, Theta2.shape), callback=self.saveResults, fprime=self.tempGrad)
+        # print costFunction(x, y_matrix, Theta1, Theta2)
+
     """
-        Initialize weights using Gaussian distribution
-        Theta1 of dimensions equal to # of Input neurons + 1
-        and # of hidden neurons
-        Theta2 of dimensions equal to # of Output neurons
-        and # of hidden neurons + bias neuron
+        Visualize #iterations of random samples
+        from the matrix rows
     """
-    Theta1 = np.random.normal(scale=0.01, size=(HIDDEN_LAYER_NEURONS, x.shape[1]))
-    Theta1 = np.c_[np.ones((Theta1.shape[0], 1)), Theta1]
-    Theta2 = np.random.normal(scale=0.01, size=(y_matrix.shape[1], HIDDEN_LAYER_NEURONS))
-    Theta2 = np.c_[np.ones((Theta2.shape[0], 1)), Theta2]
-    Theta1_unrolled = Theta1.reshape((1, Theta1.shape[0] * Theta1.shape[1]))
-    Theta2_unrolled = Theta2.reshape((1, Theta2.shape[0] * Theta2.shape[1]))
-    Theta = np.concatenate((Theta1_unrolled, Theta2_unrolled), axis=1)
+    def visualize(rows, iterations):
+        for i in range(0, iterations):
+            row = rows[random.randint(0, rows.shape[0] - 1)]
+            img = row.reshape((28,28))
+            cv2.imshow("Image", img)
+            cv2.waitKey(0)
+            cv2.destroyAllWindows()
+    """
+        The cost function as defined
+    """
+    def costFunction(self, Theta, X, Y, th1_shape, th2_shape):
+        Theta1 = Theta[0:(th1_shape[0] * th1_shape[1])]
+        Theta1 = Theta1.reshape(th1_shape)
+        Theta2 = Theta[(th1_shape[0] * th1_shape[1]):]
+        Theta2 = Theta2.reshape(th2_shape)
+        Hypoths, Theta1_grad, Theta2_grad = self.forwardProp(X, Y, Theta1, Theta2)
+        costP = (-1*Y)*np.log(Hypoths)
+        costN = (1-Y)*np.log(1-Hypoths)
+        self.J = (np.sum( costP - costN ))/X.shape[0]
+        self.Theta_grad = np.concatenate((Theta1_grad.ravel(), Theta2_grad.ravel()), axis=0)
+        return (self.J, self.Theta_grad)
 
-    # visualize(x, 10)   # Visualize some random samples
-    visualizeWithPredict(x, ((Theta1.shape), (Theta2.shape)), 10)
-    # opt = optimize.fmin_cg(tempCost, Theta, maxiter=100, args=(x, y_matrix, Theta1.shape, Theta2.shape), callback=saveResults, retall=True, fprime=tempGrad)
-    # print costFunction(x, y_matrix, Theta1, Theta2)
 
+    """
+        Perform forward propagation on the network
+        and backward propagation, this returns the
+        cost of the network and the gradients to
+        the parameters
+    """
+    def forwardProp(self, X, Y, Theta1, Theta2):
+        a1 = np.c_[np.ones((X.shape[0], 1)), X]
+        
 
-"""
-    Visualize #iterations of random samples
-    from the matrix rows
-"""
-def visualize(rows, iterations):
-    for i in range(0, iterations):
-        row = rows[random.randint(0, rows.shape[0] - 1)]
-        img = row.reshape((28,28))
-        cv2.imshow("Image", img)
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
+        z2 = a1.dot(Theta1.T)
+        a2 = self.sigmoid(z2)
+        a2 = np.c_[np.ones((a2.shape[0], 1)), a2]
 
-def costFunction(Theta, X, Y, th1_shape, th2_shape):
-    Theta1 = Theta[0:(th1_shape[0] * th1_shape[1])]
-    Theta1 = Theta1.reshape(th1_shape)
-    Theta2 = Theta[(th1_shape[0] * th1_shape[1]):]
-    Theta2 = Theta2.reshape(th2_shape)
-    Hypoths, Theta1_grad, Theta2_grad = forwardProp(X, Y, Theta1, Theta2)
-    J = (sum(sum( (-1*Y)*np.log(Hypoths) - (1-Y)*np.log(1-Hypoths) )))/X.shape[0]
-    Theta_grad = np.concatenate((Theta1_grad.ravel(), Theta2_grad.ravel()), axis=0)
-    return (J, Theta_grad)
+        z3 = a2.dot(Theta2.T)
+        a3 = self.sigmoid(z3)
 
-def forwardProp(X, Y, Theta1, Theta2):
-    a1 = np.c_[np.ones((X.shape[0], 1)), X]
-    
+        d3 = a3 - Y
+        d2 = (d3.dot(Theta2[:, 1:])) * self.sigmoid_gradient(z2)
 
-    z2 = a1.dot(Theta1.T)
-    a2 = sigmoid(z2)
-    a2 = np.c_[np.ones((a2.shape[0], 1)), a2]
+        Delta1 = d2.T.dot(a1)
+        Delta2 = d3.T.dot(a2)
 
-    z3 = a2.dot(Theta2.T)
-    a3 = sigmoid(z3)
+        Theta1_grad = Delta1/(X.shape[0])
+        Theta2_grad = Delta2/(X.shape[0])
 
-    d3 = a3 - Y
-    d2 = (d3.dot(Theta2[:, 1:])) * sigmoid_gradient(z2)
+        return (a3, Theta1_grad, Theta2_grad)
 
-    Delta1 = d2.T.dot(a1)
-    Delta2 = d3.T.dot(a2)
+    """
+        1 / (1+e^-x)
+    """
+    def sigmoid(self, x):
+        return np.divide(1., (1 + np.exp(-x)))
 
-    Theta1_grad = Delta1/(X.shape[0])
-    Theta2_grad = Delta2/(X.shape[0])
+    """
+        Gradient of sigmoid
+    """
+    def sigmoid_gradient(self, x):
+        return self.sigmoid(x) * (1-self.sigmoid(x))
+    """
+        Callback function during each iteration to
+        save the results found
+    """
+    def saveResults(self, opt):
+        np.savetxt("params.txt", opt)
 
-    return (a3, Theta1_grad, Theta2_grad)
+    """
+        Had to resort to this to overcome the
+        single allowed return value from costFunction
+        into fmin_cg
+    """
+    def tempCost(self, Theta, X, Y, th1_shape, th2_shape):
+        self.costFunction(Theta, X, Y, th1_shape, th2_shape)[0]
+        return self.J
 
-def sigmoid(x):
-    return 1 / (1 + np.exp(-x))
+    """
+        Wasteful function that I must use to return
+        the gradient from Forward Prop to the fmin_cg
+        function, since it only accepts 1 return value
+    """
+    def tempGrad(self, Theta, X, Y, th1_shape, th2_shape):
+        return self.Theta_grad
 
-def sigmoid_gradient(x):
-    return sigmoid(x) * (1-sigmoid(x))
-def saveResults(opt):
-    np.savetxt("params.txt", opt)
+    """
+        Visualize some random samples and
+        predict their value
+    """
+    def visualizeWithPredict(self, iterations):
+        weights = np.loadtxt("params.txt")
+        X = np.loadtxt("../../tiny.csv", dtype=np.uint8, skiprows=1, delimiter=",")
+        X = X[:, 0:X.shape[1]-1]
+        Theta1_shape = (self.HIDDEN_LAYER_NEURONS, X.shape[1] + 1)
+        Theta2_shape = (self.OUTPUT_NEURONS, self.HIDDEN_LAYER_NEURONS + 1)
+        Theta1 = weights[0:Theta1_shape[0]*Theta1_shape[1]]
+        Theta2 = weights[Theta1_shape[0]*Theta1_shape[1]:]
+        Theta1 = Theta1.reshape(Theta1_shape)
+        Theta2 = Theta2.reshape(Theta2_shape)
+        for i in range(0, iterations):
+            row = X[random.randint(0, X.shape[0] - 1)]
+            img = row.reshape((28,28))
+            x = row.reshape((1, row.shape[0]))
+            Y = np.zeros((1, 10))
+            predictions = self.forwardProp(x, Y, Theta1, Theta2)[0]
+            cv2.imshow("Image", img)
+            print predictions.argmax(axis=1)
+            cv2.waitKey(0)
+            cv2.destroyAllWindows()
 
-def tempCost(Theta, X, Y, th1_shape, th2_shape):
-    return costFunction(Theta, X, Y, th1_shape, th2_shape)[0]
-
-def tempGrad(Theta, X, Y, th1_shape, th2_shape):
-    return costFunction(Theta, X, Y, th1_shape, th2_shape)[1]
-
-def visualizeWithPredict(X, th_shapes, iterations):
-    weights = np.loadtxt("params.txt")
-    # X = np.loadtxt("../../test.csv", dtype=np.uint8, skiprows=1, delimiter=",")
-    Theta1_shape = th_shapes[0]
-    Theta2_shape = th_shapes[1]
-    Theta1 = weights[0:Theta1_shape[0]*Theta1_shape[1]]
-    Theta2 = weights[Theta1_shape[0]*Theta1_shape[1]:]
-    Theta1 = Theta1.reshape(Theta1_shape)
-    Theta2 = Theta2.reshape(Theta2_shape)
-    for i in range(0, iterations):
-        row = X[random.randint(0, X.shape[0] - 1)]
-        img = row.reshape((28,28))
-        x = row.reshape((1, row.shape[0]))
-        Y = np.zeros((1, 10))
-        predictions = forwardProp(x, Y, Theta1, Theta2)[0]
-        cv2.imshow("Image", img)
-        print predictions.argmax(axis=1)
-        print predictions
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
-
-main()
+Network = nn(200, "test")
