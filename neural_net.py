@@ -11,7 +11,7 @@ class nn:
         if (mode == "test"):
             self.visualizeWithPredict(10)
             return
-        file_data = np.loadtxt("../../tiny.csv", dtype=np.uint8, skiprows=1, delimiter=",")  # Load the data
+        file_data = np.loadtxt("../../train.csv", dtype=np.uint8, skiprows=1, delimiter=",")  # Load the data
         y = file_data[:, 0]  # Extract the labels
         x = file_data[:, 1:] # Extract the unrolled images
         y_matrix = np.zeros((y.shape[0], self.OUTPUT_NEURONS))   # Initialize Matrix to hold label vectors
@@ -31,10 +31,11 @@ class nn:
         Theta1_unrolled = Theta1.reshape((1, Theta1.shape[0] * Theta1.shape[1]))
         Theta2_unrolled = Theta2.reshape((1, Theta2.shape[0] * Theta2.shape[1]))
         Theta = np.concatenate((Theta1_unrolled, Theta2_unrolled), axis=1).ravel()
-        self.costFunction(Theta, x, y_matrix, Theta1.shape, Theta2.shape)
+        Lambda = 0.01
+        self.costFunction(Theta, x, y_matrix, Theta1.shape, Theta2.shape, Lambda)
         # visualize(x, 10)   # Visualize some random samples
         # visualizeWithPredict(x, ((Theta1.shape), (Theta2.shape)), 10)
-        opt = optimize.fmin_cg(self.tempCost, Theta, maxiter=1, args=(x, y_matrix, Theta1.shape, Theta2.shape), callback=self.saveResults, fprime=self.tempGrad)
+        opt = optimize.fmin_cg(self.tempCost, Theta, maxiter=200, args=(x, y_matrix, Theta1.shape, Theta2.shape, Lambda), callback=self.saveResults, fprime=self.tempGrad)
         # print costFunction(x, y_matrix, Theta1, Theta2)
 
     """
@@ -51,15 +52,17 @@ class nn:
     """
         The cost function as defined
     """
-    def costFunction(self, Theta, X, Y, th1_shape, th2_shape):
+    def costFunction(self, Theta, X, Y, th1_shape, th2_shape, Lambda):
         Theta1 = Theta[0:(th1_shape[0] * th1_shape[1])]
         Theta1 = Theta1.reshape(th1_shape)
         Theta2 = Theta[(th1_shape[0] * th1_shape[1]):]
         Theta2 = Theta2.reshape(th2_shape)
-        Hypoths, Theta1_grad, Theta2_grad = self.forwardProp(X, Y, Theta1, Theta2)
+        Hypoths, Theta1_grad, Theta2_grad = self.forwardProp(X, Y, Theta1, Theta2, Lambda)
         costP = (-1*Y)*np.log(Hypoths)
         costN = (1-Y)*np.log(1-Hypoths)
+        regulznParam = (Lambda/(2*X.shape[0])) * (np.sum(Theta1**2) + np.sum(Theta2**2))
         self.J = (np.sum( costP - costN ))/X.shape[0]
+        self.J = self.J + regulznParam
         self.Theta_grad = np.concatenate((Theta1_grad.ravel(), Theta2_grad.ravel()), axis=0)
         return (self.J, self.Theta_grad)
 
@@ -70,25 +73,34 @@ class nn:
         cost of the network and the gradients to
         the parameters
     """
-    def forwardProp(self, X, Y, Theta1, Theta2):
-        a1 = np.c_[np.ones((X.shape[0], 1)), X]
+    def forwardProp(self, X, Y, Theta1, Theta2, Lambda):
+        a1 = np.c_[np.ones((X.shape[0], 1)), X]     # Prepend X with a column of ones (Bias term)
         
 
-        z2 = a1.dot(Theta1.T)
-        a2 = self.sigmoid(z2)
-        a2 = np.c_[np.ones((a2.shape[0], 1)), a2]
+        z2 = a1.dot(Theta1.T)   # Compute Z2
+        a2 = self.sigmoid(z2)   # Activation of Z2
+        a2 = np.c_[np.ones((a2.shape[0], 1)), a2]   # Prepend a2 with a column of ones (Bias term)
 
-        z3 = a2.dot(Theta2.T)
-        a3 = self.sigmoid(z3)
+        z3 = a2.dot(Theta2.T)   # Computed Z3
+        a3 = self.sigmoid(z3)   # Activation of Z3
 
-        d3 = a3 - Y
-        d2 = (d3.dot(Theta2[:, 1:])) * self.sigmoid_gradient(z2)
+        """ Back propagation starts here """
 
-        Delta1 = d2.T.dot(a1)
-        Delta2 = d3.T.dot(a2)
+        d3 = a3 - Y     # delta of layer 3
+        d2 = (d3.dot(Theta2[:, 1:])) * self.sigmoid_gradient(z2)    # Compute delta of layer 2
 
-        Theta1_grad = Delta1/(X.shape[0])
-        Theta2_grad = Delta2/(X.shape[0])
+        Delta1 = d2.T.dot(a1) # Compute Delta 1  
+        Delta1 = np.divide(Delta1, X.shape[0]) # Divide by m
+        # Add regularized term
+        Delta1 = Delta1 + (Lambda * np.c_[np.zeros((Theta1.shape[0], 1)), Theta1[:, 1:]])/X.shape[0]
+
+        Delta2 = d3.T.dot(a2)   # Compute Delta 2
+        Delta2 = np.divide(Delta2, X.shape[0])  # Divide by m
+        # Add regularized term
+        Delta2 = Delta2 + (Lambda * np.c_[np.zeros((Theta2.shape[0], 1)), Theta2[:, 1:]])/X.shape[0]
+
+        Theta1_grad = Delta1/(X.shape[0])   # The computed Theta1 gradient
+        Theta2_grad = Delta2/(X.shape[0])   # The computed Theta2 gradient
 
         return (a3, Theta1_grad, Theta2_grad)
 
@@ -115,8 +127,8 @@ class nn:
         single allowed return value from costFunction
         into fmin_cg
     """
-    def tempCost(self, Theta, X, Y, th1_shape, th2_shape):
-        self.costFunction(Theta, X, Y, th1_shape, th2_shape)[0]
+    def tempCost(self, Theta, X, Y, th1_shape, th2_shape, Lambda):
+        self.costFunction(Theta, X, Y, th1_shape, th2_shape, Lambda)[0]
         return self.J
 
     """
@@ -124,7 +136,7 @@ class nn:
         the gradient from Forward Prop to the fmin_cg
         function, since it only accepts 1 return value
     """
-    def tempGrad(self, Theta, X, Y, th1_shape, th2_shape):
+    def tempGrad(self, Theta, X, Y, th1_shape, th2_shape, Lambda):
         return self.Theta_grad
 
     """
@@ -146,10 +158,10 @@ class nn:
             img = row.reshape((28,28))
             x = row.reshape((1, row.shape[0]))
             Y = np.zeros((1, 10))
-            predictions = self.forwardProp(x, Y, Theta1, Theta2)[0]
+            predictions = self.forwardProp(x, Y, Theta1, Theta2, 0)[0]
             cv2.imshow("Image", img)
             print predictions.argmax(axis=1)
             cv2.waitKey(0)
             cv2.destroyAllWindows()
 
-Network = nn(200, "test")
+Network = nn(200, "train")
