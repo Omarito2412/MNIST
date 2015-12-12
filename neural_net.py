@@ -4,12 +4,15 @@ import random
 from scipy import optimize
 
 class nn:
-    def __init__(self, neurons, mode="train"):
+    def __init__(self, neurons, mode="train", iterations=10):
 
         self.HIDDEN_LAYER_NEURONS = neurons
         self.OUTPUT_NEURONS = 10
-        if (mode == "test"):
-            self.visualizeWithPredict(10)
+        if (mode == "visualize"):
+            self.visualizeWithPredict(iterations)
+            return
+        elif (mode == "predict"):
+            self.predict()
             return
         file_data = np.loadtxt("../../train.csv", dtype=np.uint8, skiprows=1, delimiter=",")  # Load the data
         y = file_data[:, 0]  # Extract the labels
@@ -24,23 +27,25 @@ class nn:
             Theta2 of dimensions equal to # of Output neurons
             and # of hidden neurons + bias neuron
         """
-        Theta1 = np.random.normal(scale=0.01, size=(self.HIDDEN_LAYER_NEURONS, x.shape[1]))
+        Theta1 = np.random.normal(scale=0.02, size=(self.HIDDEN_LAYER_NEURONS, x.shape[1]))
         Theta1 = np.c_[np.ones((Theta1.shape[0], 1)), Theta1]
-        Theta2 = np.random.normal(scale=0.01, size=(y_matrix.shape[1], self.HIDDEN_LAYER_NEURONS))
+        Theta2 = np.random.normal(scale=0.02, size=(y_matrix.shape[1], self.HIDDEN_LAYER_NEURONS))
         Theta2 = np.c_[np.ones((Theta2.shape[0], 1)), Theta2]
         Theta1_unrolled = Theta1.reshape((1, Theta1.shape[0] * Theta1.shape[1]))
         Theta2_unrolled = Theta2.reshape((1, Theta2.shape[0] * Theta2.shape[1]))
         Theta = np.concatenate((Theta1_unrolled, Theta2_unrolled), axis=1).ravel()
-        Lambda = 0.01
+
+        Lambda = 0.001  # Regularization parameter
+
+        # Run Forward Prop once to initialize gradients
         self.costFunction(Theta, x, y_matrix, Theta1.shape, Theta2.shape, Lambda)
-        # visualize(x, 10)   # Visualize some random samples
-        # visualizeWithPredict(x, ((Theta1.shape), (Theta2.shape)), 10)
-        opt = optimize.fmin_cg(self.tempCost, Theta, maxiter=200, args=(x, y_matrix, Theta1.shape, Theta2.shape, Lambda), callback=self.saveResults, fprime=self.tempGrad)
-        # print costFunction(x, y_matrix, Theta1, Theta2)
+
+        # Optimize and save the results
+        opt = optimize.fmin_cg(self.tempCost, Theta, maxiter=150, args=(x, y_matrix, Theta1.shape, Theta2.shape, Lambda), callback=self.saveResults, fprime=self.tempGrad)
 
     """
         Visualize #iterations of random samples
-        from the matrix rows
+        from the matrix rows, no prediction
     """
     def visualize(rows, iterations):
         for i in range(0, iterations):
@@ -53,16 +58,19 @@ class nn:
         The cost function as defined
     """
     def costFunction(self, Theta, X, Y, th1_shape, th2_shape, Lambda):
-        Theta1 = Theta[0:(th1_shape[0] * th1_shape[1])]
-        Theta1 = Theta1.reshape(th1_shape)
-        Theta2 = Theta[(th1_shape[0] * th1_shape[1]):]
-        Theta2 = Theta2.reshape(th2_shape)
+        Theta1 = Theta[0:(th1_shape[0] * th1_shape[1])] # Extract Theta1
+        Theta1 = Theta1.reshape(th1_shape)   # Reshape
+        Theta2 = Theta[(th1_shape[0] * th1_shape[1]):]  # Extract Theta2
+        Theta2 = Theta2.reshape(th2_shape)   # Reshape
+        # Run an iteration of Forward Prop and retrieve the Hypothesis and gradients
         Hypoths, Theta1_grad, Theta2_grad = self.forwardProp(X, Y, Theta1, Theta2, Lambda)
-        costP = (-1*Y)*np.log(Hypoths)
-        costN = (1-Y)*np.log(1-Hypoths)
+        costP = (-1*Y)*np.log(Hypoths)  # Positive cost
+        costN = (1-Y)*np.log(1-Hypoths) # Negative cost
+        # The cost function regularization parameter
         regulznParam = (Lambda/(2*X.shape[0])) * (np.sum(Theta1**2) + np.sum(Theta2**2))
         self.J = (np.sum( costP - costN ))/X.shape[0]
-        self.J = self.J + regulznParam
+        self.J = self.J + regulznParam  # Save the cost to this property
+        # Save the gradient to this property
         self.Theta_grad = np.concatenate((Theta1_grad.ravel(), Theta2_grad.ravel()), axis=0)
         return (self.J, self.Theta_grad)
 
@@ -99,8 +107,8 @@ class nn:
         # Add regularized term
         Delta2 = Delta2 + (Lambda * np.c_[np.zeros((Theta2.shape[0], 1)), Theta2[:, 1:]])/X.shape[0]
 
-        Theta1_grad = Delta1/(X.shape[0])   # The computed Theta1 gradient
-        Theta2_grad = Delta2/(X.shape[0])   # The computed Theta2 gradient
+        Theta1_grad = Delta1  # The computed Theta1 gradient
+        Theta2_grad = Delta2   # The computed Theta2 gradient
 
         return (a3, Theta1_grad, Theta2_grad)
 
@@ -112,12 +120,15 @@ class nn:
 
     """
         Gradient of sigmoid
+        (1 / (1+e^-x))*(1 - 1 / (1+e^-x))
     """
     def sigmoid_gradient(self, x):
         return self.sigmoid(x) * (1-self.sigmoid(x))
     """
         Callback function during each iteration to
-        save the results found
+        save the results found, useful to print the 
+        cost throughout iterations to see how it
+        changes
     """
     def saveResults(self, opt):
         np.savetxt("params.txt", opt)
@@ -132,9 +143,9 @@ class nn:
         return self.J
 
     """
-        Wasteful function that I must use to return
-        the gradient from Forward Prop to the fmin_cg
-        function, since it only accepts 1 return value
+        Since fmin_cg only expects one returned value
+        from the cost function, this will return the 
+        computed gradient.
     """
     def tempGrad(self, Theta, X, Y, th1_shape, th2_shape, Lambda):
         return self.Theta_grad
@@ -145,23 +156,45 @@ class nn:
     """
     def visualizeWithPredict(self, iterations):
         weights = np.loadtxt("params.txt")
-        X = np.loadtxt("../../tiny.csv", dtype=np.uint8, skiprows=1, delimiter=",")
-        X = X[:, 0:X.shape[1]-1]
-        Theta1_shape = (self.HIDDEN_LAYER_NEURONS, X.shape[1] + 1)
-        Theta2_shape = (self.OUTPUT_NEURONS, self.HIDDEN_LAYER_NEURONS + 1)
-        Theta1 = weights[0:Theta1_shape[0]*Theta1_shape[1]]
-        Theta2 = weights[Theta1_shape[0]*Theta1_shape[1]:]
-        Theta1 = Theta1.reshape(Theta1_shape)
-        Theta2 = Theta2.reshape(Theta2_shape)
-        for i in range(0, iterations):
-            row = X[random.randint(0, X.shape[0] - 1)]
-            img = row.reshape((28,28))
-            x = row.reshape((1, row.shape[0]))
-            Y = np.zeros((1, 10))
-            predictions = self.forwardProp(x, Y, Theta1, Theta2, 0)[0]
-            cv2.imshow("Image", img)
-            print predictions.argmax(axis=1)
-            cv2.waitKey(0)
+        X = np.loadtxt("../../test.csv", dtype=np.uint8, skiprows=1, delimiter=",")
+        Theta1_shape = (self.HIDDEN_LAYER_NEURONS, X.shape[1] + 1)  # Shape of Theta1
+        Theta2_shape = (self.OUTPUT_NEURONS, self.HIDDEN_LAYER_NEURONS + 1) # Shape of Theta2
+        Theta1 = weights[0:Theta1_shape[0]*Theta1_shape[1]] # Extract Theta1
+        Theta2 = weights[Theta1_shape[0]*Theta1_shape[1]:]  # Extract Theta2
+        Theta1 = Theta1.reshape(Theta1_shape) # Reshape
+        Theta2 = Theta2.reshape(Theta2_shape) # Reshape
+        for i in range(0, iterations):  # Loop as many iterations as specified
+            row = X[random.randint(0, X.shape[0] - 1)]  # Pick a random sample
+            img = row.reshape((28,28))  # Reshape it into a 28x28 image
+            x = row.reshape((1, row.shape[0]))  # Unroll the sample to run into ForwardProp
+            Y = np.zeros((1, 10))   # Dummy output
+            predictions = self.forwardProp(x, Y, Theta1, Theta2, 0)[0]  # The prediction result
+            cv2.imshow("Image", img)    # Show the image
+            print predictions.argmax(axis=1)    # The prediction is the maximum probability
+            cv2.waitKey(0)  # Hold the image until a key is pressed
             cv2.destroyAllWindows()
 
-Network = nn(200, "train")
+    """ 
+        Solve the test dataset
+    """
+    def predict(self):
+        weights = np.loadtxt("params.txt")
+        X = np.loadtxt("../../test.csv", dtype=np.uint8, skiprows=1, delimiter=",")
+        Theta1_shape = (self.HIDDEN_LAYER_NEURONS, X.shape[1] + 1)  # Shape of Theta1
+        Theta2_shape = (self.OUTPUT_NEURONS, self.HIDDEN_LAYER_NEURONS + 1) # Shape of Theta2
+        Theta1 = weights[0:Theta1_shape[0]*Theta1_shape[1]] # Extract Theta1
+        Theta2 = weights[Theta1_shape[0]*Theta1_shape[1]:]  # Extract Theta2
+        Theta1 = Theta1.reshape(Theta1_shape)   # Reshape
+        Theta2 = Theta2.reshape(Theta2_shape)   # Reshape
+        Y = np.zeros((X.shape[0], 10))          # Dummy output, param used for Backprop
+        # The predicted class is the maximum probability produced by a classifier
+        output = self.forwardProp(X, Y, Theta1, Theta2, 0)[0].argmax(axis=1)
+        indices = range(1, X.shape[0] + 1)  # Number the CSV output examples
+        output = np.column_stack((indices, output)) # Map results to row numbers
+        header = "ImageId,Label"    # Header, requested by Kaggle
+        # Save the predictions in an integer format
+        np.savetxt("result.csv", output, header="ImageId,Label", fmt=('%1i','%1i'), delimiter=",", comments="")
+        print "Complete"
+
+# Initialize a Neural network of 200 hidden neurons in predict mode
+Network = nn(200, "predict")
